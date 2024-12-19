@@ -25,56 +25,82 @@ class Converter:
                     new_folder = f"{folder_name}/{item['name']}" if folder_name else item['name']
                     process_items(item['item'], new_folder)
                 elif 'request' in item:  # 这是一个请求
-                    req = item['request']
-                    url = req['url']
-                    
-                    # 处���URL
-                    if isinstance(url, dict):
-                        protocol = url.get('protocol', 'http')
-                        if isinstance(url.get('host'), list):
-                            domain = '.'.join(url['host'])
+                    try:
+                        req = item['request']
+                        url = req.get('url', '')
+                        
+                        # 处理URL
+                        if isinstance(url, dict):
+                            protocol = url.get('protocol', 'http')
+                            if isinstance(url.get('host'), list):
+                                domain = '.'.join(url['host'])
+                            else:
+                                domain = url.get('host', '')
+                            port = url.get('port', '')
+                            if isinstance(url.get('path'), list):
+                                path = '/'.join(url['path'])
+                            else:
+                                path = url.get('path', '')
                         else:
-                            domain = url.get('host', '')
-                        port = url.get('port', '')
-                        if isinstance(url.get('path'), list):
-                            path = '/'.join(url['path'])
-                        else:
-                            path = url.get('path', '')
-                    else:
-                        from urllib.parse import urlparse
-                        parsed = urlparse(url)
-                        protocol = parsed.scheme or 'http'
-                        domain = parsed.hostname or ''
-                        port = str(parsed.port) if parsed.port else ''
-                        path = parsed.path or ''
-                    
-                    # 处理请求体
-                    body = ''
-                    if 'body' in req:
-                        if req['body'].get('mode') == 'raw':
-                            body = req['body'].get('raw', '')
-                        elif req['body'].get('mode') == 'formdata':
-                            form_data = []
-                            for form_item in req['body'].get('formdata', []):
-                                form_data.append(f"{form_item['key']}={form_item.get('value', '')}")
-                            body = '&'.join(form_data)
-                    
-                    request_name = item['name']
-                    request_data = {
-                        'name': request_name,
-                        'folder': folder_name,  # 添加文件夹信息
-                        'protocol': protocol,
-                        'domain': domain,
-                        'port': port,
-                        'path': path,
-                        'method': req['method'],
-                        'headers': [{'name': h['key'], 'value': h['value']} 
-                                  for h in req.get('header', [])],
-                        'body': body
-                    }
-                    requests.append(request_data)
+                            from urllib.parse import urlparse
+                            try:
+                                parsed = urlparse(url)
+                                protocol = parsed.scheme or 'http'
+                                domain = parsed.hostname or ''
+                                port = str(parsed.port) if parsed.port else ''
+                                path = parsed.path or ''
+                            except Exception:
+                                # 如果URL解析失败，使用默认值
+                                protocol = 'http'
+                                domain = 'localhost'
+                                port = ''
+                                path = url if isinstance(url, str) else ''
+                        
+                        # 处理请求体
+                        body = ''
+                        if 'body' in req:
+                            body_data = req.get('body', {})
+                            if isinstance(body_data, dict):
+                                if body_data.get('mode') == 'raw':
+                                    body = body_data.get('raw', '')
+                                elif body_data.get('mode') == 'formdata':
+                                    form_data = []
+                                    for form_item in body_data.get('formdata', []):
+                                        if isinstance(form_item, dict):
+                                            form_data.append(f"{form_item.get('key', '')}={form_item.get('value', '')}")
+                                    body = '&'.join(form_data)
+                        
+                        # 处理请求头
+                        headers = []
+                        if 'header' in req:
+                            header_list = req.get('header', [])
+                            if isinstance(header_list, list):
+                                for header in header_list:
+                                    if isinstance(header, dict):
+                                        headers.append({
+                                            'name': header.get('key', ''),
+                                            'value': header.get('value', '')
+                                        })
+                        
+                        request_name = item.get('name', '')
+                        request_data = {
+                            'name': request_name,
+                            'folder': folder_name,
+                            'protocol': protocol,
+                            'domain': domain,
+                            'port': port,
+                            'path': path,
+                            'method': req.get('method', 'GET'),
+                            'headers': headers,
+                            'body': body
+                        }
+                        requests.append(request_data)
+                    except Exception as e:
+                        print(f"Error processing request {item.get('name', '')}: {str(e)}")
         
-        process_items(collection['item'])
+        if 'item' in collection:
+            process_items(collection['item'])
+        
         return {'variables': variables, 'requests': requests}
 
     def parse_apipost(self, collection_path):

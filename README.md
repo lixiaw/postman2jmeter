@@ -1,0 +1,2 @@
+# postman2jmeter
+支持Apipost导出的json文件、Postman导出的json文件转换成Jmeter的jmx用例

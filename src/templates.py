@@ -39,13 +39,25 @@ JMETER_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
         <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="{{ request.name }}" enabled="true">
           <elementProp name="HTTPsampler.Arguments" elementType="Arguments" guiclass="HTTPArgumentsPanel" testclass="Arguments" enabled="true">
             <collectionProp name="Arguments.arguments">
-              {% if request.body %}
-              <elementProp name="" elementType="HTTPArgument">
-                <boolProp name="HTTPArgument.always_encode">false</boolProp>
-                <stringProp name="Argument.value">{{ request.body }}</stringProp>
+              {% if request.query_params %}
+              {% for param in request.query_params %}
+              <elementProp name="{{ param.name }}" elementType="HTTPArgument">
+                <boolProp name="HTTPArgument.always_encode">true</boolProp>
+                <stringProp name="Argument.name">{{ param.name }}</stringProp>
+                <stringProp name="Argument.value">{{ param.value }}</stringProp>
                 <stringProp name="Argument.metadata">=</stringProp>
                 <boolProp name="HTTPArgument.use_equals">true</boolProp>
               </elementProp>
+              {% endfor %}
+              {% endif %}
+              {% if request.body %}
+              {% if request.method == 'POST' or request.method == 'PUT' %}
+              <elementProp name="" elementType="HTTPArgument">
+                <boolProp name="HTTPArgument.always_encode">true</boolProp>
+                <stringProp name="Argument.value">{{ request.body }}</stringProp>
+                <stringProp name="Argument.metadata">=</stringProp>
+              </elementProp>
+              {% endif %}
               {% endif %}
             </collectionProp>
           </elementProp>

@@ -2,6 +2,7 @@ import json
 import os
 from jinja2 import Template
 from templates import JMETER_TEMPLATE
+from urllib.parse import quote, urlparse, parse_qs
 
 class Converter:
     def __init__(self):
@@ -27,35 +28,62 @@ class Converter:
                 elif 'request' in item:  # 这是一个请求
                     try:
                         req = item['request']
-                        url = req.get('url', '')
+                        url = req.get('url', {})
                         
                         # 处理URL
                         if isinstance(url, dict):
                             protocol = url.get('protocol', 'http')
+                            # 处理 host
                             if isinstance(url.get('host'), list):
-                                domain = '.'.join(url['host'])
+                                host = '.'.join(h.strip('{}') for h in url['host'])
+                                domain = host
                             else:
                                 domain = url.get('host', '')
+                                
                             port = url.get('port', '')
+                            # 处理 path
                             if isinstance(url.get('path'), list):
-                                path = '/'.join(url['path'])
+                                path = '/'.join(str(p).strip('{}') for p in url['path'])
                             else:
                                 path = url.get('path', '')
+                            
+                            # 将查询参数分离出来，不再拼接到path中
+                            query_params = []
+                            if 'query' in url:
+                                for param in url['query']:
+                                    if param.get('disabled', False):
+                                        continue
+                                    if param.get('value') is not None:
+                                        # 处理变量引用
+                                        value = str(param['value']).replace('{{', '').replace('}}', '')
+                                        query_params.append({
+                                            'name': param['key'],
+                                            'value': value
+                                        })
                         else:
-                            from urllib.parse import urlparse
+                            from urllib.parse import urlparse, parse_qs
                             try:
                                 parsed = urlparse(url)
                                 protocol = parsed.scheme or 'http'
                                 domain = parsed.hostname or ''
                                 port = str(parsed.port) if parsed.port else ''
-                                path = parsed.path or ''
+                                path = parsed.path
+                                # 解析查询参数
+                                if parsed.query:
+                                    params = parse_qs(parsed.query)
+                                    query_params = [
+                                        {'name': k, 'value': v[0]}
+                                        for k, v in params.items()
+                                    ]
+                                else:
+                                    query_params = []
                             except Exception:
-                                # 如果URL解析失败，使用默认值
                                 protocol = 'http'
                                 domain = 'localhost'
                                 port = ''
-                                path = url if isinstance(url, str) else ''
-                        
+                                path = ''
+                                query_params = []
+
                         # 处理请求体
                         body = ''
                         if 'body' in req:
@@ -66,7 +94,7 @@ class Converter:
                                 elif body_data.get('mode') == 'formdata':
                                     form_data = []
                                     for form_item in body_data.get('formdata', []):
-                                        if isinstance(form_item, dict):
+                                        if isinstance(form_item, dict) and not form_item.get('disabled', False):
                                             form_data.append(f"{form_item.get('key', '')}={form_item.get('value', '')}")
                                     body = '&'.join(form_data)
                         
@@ -76,7 +104,7 @@ class Converter:
                             header_list = req.get('header', [])
                             if isinstance(header_list, list):
                                 for header in header_list:
-                                    if isinstance(header, dict):
+                                    if isinstance(header, dict) and not header.get('disabled', False):
                                         headers.append({
                                             'name': header.get('key', ''),
                                             'value': header.get('value', '')
@@ -92,8 +120,10 @@ class Converter:
                             'path': path,
                             'method': req.get('method', 'GET'),
                             'headers': headers,
-                            'body': body
+                            'body': body,
+                            'query_params': query_params
                         }
+                        print(f"Adding request: {request_name} in folder: {folder_name}")
                         requests.append(request_data)
                     except Exception as e:
                         print(f"Error processing request {item.get('name', '')}: {str(e)}")
@@ -107,14 +137,15 @@ class Converter:
         with open(collection_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
         
-        print("Data structure:", data.keys())
+        print("\n=== Starting ApiPost parsing ===")
+        print(f"Found root keys: {data.keys()}")
         
         requests = []
         variables = []
         folders = {}  # 存储文件夹信息
         
         def build_folder_structure(items):
-            # 先构建文件夹映射
+            print("\n=== Building folder structure ===")
             for item in items:
                 if item.get('target_type') == 'folder':
                     folders[item['target_id']] = {
@@ -122,9 +153,9 @@ class Converter:
                         'parent_id': item.get('parent_id', '0'),
                         'children': []
                     }
+                    print(f"Found folder: {item['name']}")
         
         def get_folder_path(folder_id):
-            # 递归获取完整的文件夹路径
             if folder_id not in folders:
                 return ''
             folder = folders[folder_id]
@@ -133,14 +164,15 @@ class Converter:
         
         def process_items(items):
             for item in items:
-                print(f"Processing item: {item.get('name', 'Unknown')} of type {item.get('target_type', 'Unknown')}")
+                print(f"\n=== Processing item: {item.get('name')} ===")
+                print(f"Type: {item.get('target_type')}")
                 
-                # 处理 API
                 if item.get('target_type') == 'api':
                     try:
                         request = item.get('request', {})
                         parent_id = item.get('parent_id', '0')
                         folder_path = get_folder_path(parent_id)
+                        print(f"Folder path: {folder_path}")
                         
                         # 处理请求头
                         headers = []
@@ -152,18 +184,46 @@ class Converter:
                                         'name': header.get('key', ''),
                                         'value': header.get('value', '')
                                     })
+                            print(f"Headers: {headers}")
 
                         # 处理请求体
                         body = ''
-                        if request and 'body' in request:
-                            body_params = request['body'].get('parameter', [])
-                            if body_params:
-                                body_data = {}
-                                for param in body_params:
+                        query_params = []
+                        if request:
+                            print("\nProcessing request body:")
+                            # 处理 body 参数
+                            if 'body' in request:
+                                body_type = request['body'].get('mode', '')
+                                print(f"Body type: {body_type}")
+                                
+                                # 直接获取 raw 数据
+                                raw_data = request['body'].get('raw', '')
+                                if raw_data:
+                                    body = raw_data
+                                    print(f"Raw body: {body}")
+                                # 如果没有 raw 数据，尝试处理 parameter
+                                elif request['body'].get('parameter'):
+                                    body_params = request['body']['parameter']
+                                    if body_params:
+                                        body_data = {}
+                                        for param in body_params:
+                                            if isinstance(param, dict) and param.get('is_checked', 1) == 1:
+                                                body_data[param.get('key', '')] = param.get('value', '')
+                                        if body_data:
+                                            body = json.dumps(body_data)
+                                        print(f"Parameter body: {body}")
+
+                            print("\nProcessing query parameters:")
+                            # 处理 query 参数
+                            if 'query' in request and request['query'].get('parameter'):
+                                query_list = request['query']['parameter']
+                                for param in query_list:
                                     if isinstance(param, dict) and param.get('is_checked', 1) == 1:
-                                        body_data[param.get('key', '')] = param.get('value', '')
-                                if body_data:
-                                    body = json.dumps(body_data)
+                                        query_params.append({
+                                            'name': param.get('key', ''),
+                                            'value': str(param.get('value', ''))
+                                        })
+                                print(f"Query parameters: {query_params}")
 
                         # 处理 URL
                         url = item.get('url', '')
@@ -176,41 +236,48 @@ class Converter:
                         domain = parsed.hostname or 'localhost'
                         port = str(parsed.port) if parsed.port else ''
                         path = parsed.path or ''
+                        
+                        print(f"\nURL details:")
+                        print(f"Protocol: {protocol}")
+                        print(f"Domain: {domain}")
+                        print(f"Port: {port}")
+                        print(f"Path: {path}")
 
                         request_name = item['name']
                         request_data = {
                             'name': request_name,
-                            'folder': folder_path,  # 使用完整的文件夹路径
+                            'folder': folder_path,
                             'method': item.get('method', 'GET'),
                             'protocol': protocol,
                             'domain': domain,
                             'port': port,
                             'path': path,
                             'body': body,
-                            'headers': headers
+                            'headers': headers,
+                            'query_params': query_params
                         }
-                        print(f"Adding request: {request_name} in folder: {folder_path}")
+                        print(f"\nFinal request data:")
+                        print(json.dumps(request_data, indent=2))
                         requests.append(request_data)
                     except Exception as e:
                         print(f"Error processing request {item.get('name', '')}: {str(e)}")
 
-                # 递归处理子项目
-                if 'children' in item and item['children']:
-                    process_items(item['children'])
-                if 'apis' in item and item['apis']:
-                    process_items(item['apis'])
+                    # 递归处理子项目
+                    if 'children' in item and item['children']:
+                        process_items(item['children'])
+                    if 'apis' in item and item['apis']:
+                        process_items(item['apis'])
 
         # 开始处理
         if 'apis' in data:
-            print(f"Processing {len(data['apis'])} APIs from root")
-            # 先构建文件夹结构
+            print(f"\nProcessing {len(data['apis'])} APIs from root")
             build_folder_structure(data['apis'])
-            # 然后处理所有请求
             process_items(data['apis'])
         else:
-            print("No 'apis' field found in root")
+            print("\nNo 'apis' field found in root")
             process_items(data)
         
+        print(f"\n=== Processing complete ===")
         print(f"Total requests processed: {len(requests)}")
         return {'variables': variables, 'requests': requests}
 

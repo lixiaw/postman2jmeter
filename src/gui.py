@@ -33,105 +33,251 @@ class TestPlanDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Postman/ApiPost to JMeter Converter")
-        self.setMinimumSize(800, 400)
+        self.setWindowTitle("Postman/ApiPost导出JSON文件转JMeter用例")
+        self.setMinimumSize(800, 500)
+        
+        # 初始化输入框
+        self.collection_path = QLineEdit()
+        self.env_path = QLineEdit()
+        self.apipost_path = QLineEdit()
+        self.output_path = QLineEdit()
         
         # 主窗口部件
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
         
-        # 添加说明标签
-        intro_label = QLabel("请选择转换模式和相应的配置文件")
-        intro_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(intro_label)
+        # 标题
+        title_label = QLabel("Postman/ApiPost导出JSON文件转JMeter用例")
+        title_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #333; padding: 10px;")
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title_label)
         
-        # 选择转换模式
+        # 注意事项区域
+        tips_widget = QWidget()
+        tips_widget.setStyleSheet("""
+            QWidget {
+                background-color: #fff3cd;
+                border: 1px solid #ffeeba;
+                border-radius: 6px;
+                padding: 10px;
+            }
+            QLabel {
+                color: #856404;
+                font-size: 12px;
+                background: transparent;
+                padding: 2px 0;
+            }
+        """)
+        tips_layout = QVBoxLayout(tips_widget)
+        tips_layout.setSpacing(2)
+        tips_layout.setContentsMargins(10, 5, 10, 5)
+        
+        tips_title = QLabel("注意事项：")
+        tips_title.setStyleSheet("font-weight: bold; font-size: 13px;")
+        tips_layout.addWidget(tips_title)
+        
+        tips = [
+            "1. Postman格式：请使用 Collection v2.1 版本导出的 JSON 文件",
+            "2. ApiPost格式：请使用 ApiPost 导出的 JSON 文件",
+            "3. 输出路径默认与输入文件在同一目录",
+            "4. 生成的 JMX 文件可直接导入 JMeter 使用",
+            "5. 支持文件夹嵌套结构，将自动转换为 ThreadGroup"
+        ]
+        
+        for tip in tips:
+            tip_label = QLabel(tip)
+            tip_label.setWordWrap(True)
+            tips_layout.addWidget(tip_label)
+        
+        layout.addWidget(tips_widget)
+        
+        # 模式选择区域
+        mode_widget = QWidget()
+        mode_widget.setStyleSheet("""
+            QWidget {
+                background-color: #f8f9fa;
+                border-radius: 6px;
+                padding: 10px;
+            }
+            QRadioButton {
+                font-size: 13px;
+                padding: 5px 15px;
+            }
+            QRadioButton:hover {
+                background-color: #e9ecef;
+                border-radius: 4px;
+            }
+        """)
+        mode_layout = QHBoxLayout(mode_widget)
+        mode_layout.setSpacing(20)
+        mode_layout.setContentsMargins(10, 5, 10, 5)
+        
         mode_group = QButtonGroup(self)
-        mode_layout = QHBoxLayout()
         self.postman_radio = QRadioButton("Postman")
         self.apipost_radio = QRadioButton("ApiPost")
         mode_group.addButton(self.postman_radio)
         mode_group.addButton(self.apipost_radio)
         mode_layout.addWidget(self.postman_radio)
         mode_layout.addWidget(self.apipost_radio)
-        layout.addLayout(mode_layout)
+        mode_layout.addStretch()
         
-        # 文件选择区域
-        self.file_layout = QVBoxLayout()
+        layout.addWidget(mode_widget)
         
-        # Postman文件选择
-        self.postman_widget = QWidget()
-        postman_layout = QVBoxLayout(self.postman_widget)
+        # 模式选择区域通用样式
+        self.file_widget_style = """
+            QWidget {
+                background-color: #f8f9fa;
+                border-radius: 6px;
+                padding: 5px;
+            }
+            QLabel {
+                background: transparent;
+                font-size: 13px;
+                color: #495057;
+                padding: 0 5px;
+            }
+            QLineEdit {
+                padding: 5px;
+                border: 1px solid #ced4da;
+                border-radius: 4px;
+                background-color: white;
+                min-height: 20px;
+            }
+            QPushButton {
+                padding: 5px 10px;
+                background-color: #007bff;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                min-width: 80px;
+            }
+            QPushButton:hover {
+                background-color: #0056b3;
+            }
+        """
         
-        # Collection文件选择
-        collection_layout = QHBoxLayout()
-        self.collection_path = QLineEdit()
-        self.collection_path.setPlaceholderText("请选择Postman Collection文件")
-        collection_btn = QPushButton("选择Collection文件")
-        collection_layout.addWidget(self.collection_path)
-        collection_layout.addWidget(collection_btn)
-        postman_layout.addLayout(collection_layout)
+        # Postman区域
+        self.postman_widget = self.create_file_section([
+            ("Collection文件:", self.collection_path, "请选择Postman Collection文件"),
+            ("Environment文件 (可选):", self.env_path, "请选择Postman Environment文件")
+        ])
+        layout.addWidget(self.postman_widget)
         
-        # Environment文件选择
-        env_layout = QHBoxLayout()
-        self.env_path = QLineEdit()
-        self.env_path.setPlaceholderText("请选择Postman Environment文件（可选）")
-        env_btn = QPushButton("选择Environment文件")
-        env_layout.addWidget(self.env_path)
-        env_layout.addWidget(env_btn)
-        postman_layout.addLayout(env_layout)
+        # ApiPost区域
+        self.apipost_widget = self.create_file_section([
+            ("ApiPost文件:", self.apipost_path, "请选择ApiPost导出的JSON文件")
+        ])
+        layout.addWidget(self.apipost_widget)
         
-        # ApiPost文件选择
-        self.apipost_widget = QWidget()
-        apipost_layout = QHBoxLayout(self.apipost_widget)
-        self.apipost_path = QLineEdit()
-        self.apipost_path.setPlaceholderText("请选择ApiPost导出的JSON文件")
-        apipost_btn = QPushButton("选择ApiPost文件")
-        apipost_layout.addWidget(self.apipost_path)
-        apipost_layout.addWidget(apipost_btn)
-        
-        # 输出路径显示和选择
-        output_layout = QHBoxLayout()
-        self.output_path = QLineEdit()
-        self.output_path.setPlaceholderText("输出路径（与输入文件同级目录）")
-        output_btn = QPushButton("选择输出路径")
-        output_layout.addWidget(QLabel("输出路径:"))
-        output_layout.addWidget(self.output_path)
-        output_layout.addWidget(output_btn)
-        
-        self.file_layout.addWidget(self.postman_widget)
-        self.file_layout.addWidget(self.apipost_widget)
-        self.file_layout.addLayout(output_layout)
-        layout.addLayout(self.file_layout)
+        # 输出路径区域
+        self.output_widget = self.create_file_section([
+            ("输出路径:", self.output_path, "输出路径（与输入文件同级目录）")
+        ])
+        layout.addWidget(self.output_widget)
         
         # 转换按钮
-        convert_btn = QPushButton("转换")
-        convert_btn.setFixedHeight(40)
+        convert_btn = QPushButton("开始转换")
+        convert_btn.setStyleSheet("""
+            QPushButton {
+                padding: 10px;
+                font-size: 14px;
+                font-weight: bold;
+                background-color: #28a745;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                min-height: 40px;
+            }
+            QPushButton:hover {
+                background-color: #218838;
+            }
+        """)
         layout.addWidget(convert_btn)
         
         # 状态标签
         self.status_label = QLabel("")
+        self.status_label.setStyleSheet("""
+            QLabel {
+                font-size: 13px;
+                color: #666;
+                padding: 10px;
+            }
+        """)
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.status_label)
+        
+        layout.addStretch()
         
         # 信号连接
         self.postman_radio.toggled.connect(self.toggle_mode)
         self.apipost_radio.toggled.connect(self.toggle_mode)
-        collection_btn.clicked.connect(lambda: self.select_file(self.collection_path, "Postman Collection (*.json)"))
-        env_btn.clicked.connect(lambda: self.select_file(self.env_path, "Postman Environment (*.json)"))
-        apipost_btn.clicked.connect(lambda: self.select_file(self.apipost_path, "ApiPost Export (*.json)"))
+        collection_btn = self.postman_widget.findChild(QPushButton)
+        if collection_btn:
+            collection_btn.clicked.connect(lambda: self.select_file(self.collection_path, "Postman Collection (*.json)"))
+        env_btn = self.postman_widget.findChildren(QPushButton)[1]
+        if env_btn:
+            env_btn.clicked.connect(lambda: self.select_file(self.env_path, "Postman Environment (*.json)"))
+        apipost_btn = self.apipost_widget.findChild(QPushButton)
+        if apipost_btn:
+            apipost_btn.clicked.connect(lambda: self.select_file(self.apipost_path, "ApiPost Export (*.json)"))
+        output_btn = self.output_widget.findChild(QPushButton)
+        if output_btn:
+            output_btn.clicked.connect(self.select_output_dir)
         convert_btn.clicked.connect(self.convert)
-        output_btn.clicked.connect(self.select_output_dir)
         
         # 初始化界面
         self.postman_radio.setChecked(True)
         self.toggle_mode()
+
+    def create_file_section(self, fields):
+        """创建文件选择区域"""
+        widget = QWidget()
+        widget.setStyleSheet(self.file_widget_style)
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(10)
+        layout.setContentsMargins(10, 10, 10, 10)  # 减小边距
         
+        for label_text, line_edit, placeholder in fields:
+            field_layout = QHBoxLayout()  # 改为水平布局
+            field_layout.setSpacing(10)
+            
+            label = QLabel(label_text)
+            label.setFixedWidth(120)  # 固定标签宽度
+            
+            line_edit.setPlaceholderText(placeholder)
+            btn = QPushButton("选择文件" if "路径" not in label_text else "选择路径")
+            btn.setFixedWidth(80)  # 固定按钮宽度
+            
+            field_layout.addWidget(label)
+            field_layout.addWidget(line_edit, 1)  # 设置拉伸因子为1，使输入框自动填充剩余空间
+            field_layout.addWidget(btn)
+            
+            layout.addLayout(field_layout)
+        
+        return widget
+
     def toggle_mode(self):
         is_postman = self.postman_radio.isChecked()
         self.postman_widget.setVisible(is_postman)
         self.apipost_widget.setVisible(not is_postman)
+        
+        # 清空输入框内容
+        if is_postman:
+            # 切换到 Postman 模式时清空 ApiPost 输入框
+            self.apipost_path.clear()
+        else:
+            # 切换到 ApiPost 模式时清空 Postman 输入框
+            self.collection_path.clear()
+            self.env_path.clear()
+        
+        # 清空输出路径
+        self.output_path.clear()
+        
+        # 清空状态标签
+        self.status_label.clear()
         
     def select_file(self, line_edit, file_filter):
         file_name, _ = QFileDialog.getOpenFileName(
@@ -150,7 +296,7 @@ class MainWindow(QMainWindow):
         dir_name = QFileDialog.getExistingDirectory(
             self,
             "选择输出目录",
-            self.output_path.text() or ""  # 如果当前有路径则使用当前路径作为起始目录
+            self.output_path.text() or ""  # 如果当前有路径使用当前路径为起始目录
         )
         if dir_name:
             self.output_path.setText(dir_name)
